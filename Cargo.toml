@@ -8,5 +8,5 @@ edition = "2018"
 
 [dependencies]
 postcard = "0.7.0"
-serde = "1.0.126"
+serde = { version = "1.0.126", default-features = false }
 

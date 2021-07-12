@@ -16,13 +16,13 @@
 use postcard::{take_from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct TargetFunction(u8);
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
+pub struct TargetFunction(pub u8);
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Target(u8);
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
+pub struct Target(pub u8);
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum Op {
     Label(Target),
     Call(TargetFunction),
@@ -31,37 +31,41 @@ pub enum Op {
     Push16(u16),
     Push32(u32),
     PushNone,
+    Swap,
     Dup,
     Add,
     BranchLessThan(Target),
+    BranchLessThanOrEqualTo(Target),
     BranchGreaterThan(Target),
+    BranchGreaterThanOrEqualTo(Target),
     BranchEqualTo(Target),
     BranchAlways(Target),
     Done,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum IllegalOp {
     NoTarget,
     BadTarget,
     BadFunction,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum Fault {
     StackOverflow,
     StackUnderflow,
     OperationOnNone,
     DropUnderflow,
     DupUnderflow,
-    MissingParameter(u8),
+    MissingParameters,
     BadParameter(u8),
+    EmptyParameter(u8),
     ReturnValueOverflow,
     ReturnStackOverflow,
     DoneStackOverflow,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum Failure {
     IllegalOp(IllegalOp),
     Fault(Fault),
@@ -205,6 +209,16 @@ pub fn execute<'a>(
                         sp = drop(stack, sp)?;
                     }
 
+                    Op::Swap => {
+                        if sp < 2 {
+                            return Err(Failure::Fault(Fault::DupUnderflow));
+                        }
+
+                        let tmp = stack[sp - 1];
+                        stack[sp - 1] = stack[sp - 2];
+                        stack[sp - 2] = tmp;
+                    }
+
                     Op::BranchLessThan(Target(val)) => {
                         let (lhs, rhs) = operands(&stack, sp)?;
 
@@ -213,10 +227,26 @@ pub fn execute<'a>(
                         }
                     }
 
+                    Op::BranchLessThanOrEqualTo(Target(val)) => {
+                        let (lhs, rhs) = operands(&stack, sp)?;
+
+                        if lhs <= rhs {
+                            pc = target(&labels, val)?;
+                        }
+                    }
+
                     Op::BranchGreaterThan(Target(val)) => {
                         let (lhs, rhs) = operands(&stack, sp)?;
 
                         if lhs > rhs {
+                            pc = target(&labels, val)?;
+                        }
+                    }
+
+                    Op::BranchGreaterThanOrEqualTo(Target(val)) => {
+                        let (lhs, rhs) = operands(&stack, sp)?;
+
+                        if lhs >= rhs {
                             pc = target(&labels, val)?;
                         }
                     }
@@ -297,7 +327,7 @@ mod tests {
     //
     fn func(stack: &[Option<u32>], rval: &mut [u8]) -> Result<usize, Failure> {
         if stack.len() == 0 {
-            Err(Failure::Fault(Fault::MissingParameter(0)))
+            Err(Failure::Fault(Fault::MissingParameters))
         } else if rval.len() < 1 {
             Err(Failure::Fault(Fault::ReturnValueOverflow))
         } else {
@@ -424,7 +454,7 @@ mod tests {
     fn missing_parameter() {
         let op = [Op::Call(TargetFunction(0))];
 
-        fault(&op, Fault::MissingParameter(0));
+        fault(&op, Fault::MissingParameters);
     }
 
     #[test]
