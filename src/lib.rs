@@ -88,6 +88,7 @@ pub fn execute<'a>(
     stack: &mut [Option<u32>],
     rstack: &mut [u8],
     scratch: &mut [u8],
+    mut check: impl FnMut(usize, &Op) -> Result<(), Failure>,
 ) -> Result<(), Failure> {
     let mut pc = text;
     let mut sp = 0;
@@ -172,6 +173,8 @@ pub fn execute<'a>(
     loop {
         match take_from_bytes::<Op>(pc) {
             Ok((op, npc)) => {
+                check(pc.as_ptr() as usize - text.as_ptr() as usize, &op)?;
+
                 pc = npc;
 
                 match op {
@@ -353,6 +356,7 @@ mod tests {
         let functions: &[Function] = &[func];
 
         let serialized = to_slice(op, &mut text).unwrap();
+        let mut ninstr = 0;
 
         execute(
             &serialized[1..],
@@ -360,7 +364,14 @@ mod tests {
             &mut stack,
             &mut rstack,
             &mut scratch,
+            |offset, op| {
+                std::println!("offset 0x{:04x}: {:?}", offset, op);
+                ninstr += 1;
+                Ok(())
+            },
         )?;
+
+        std::println!("{} total instructions", ninstr);
 
         let mut rvec = vec![];
         let mut result = &rstack[0..];
