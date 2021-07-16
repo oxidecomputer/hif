@@ -328,7 +328,7 @@ mod tests {
     // is even, otherwise it returns a failure with the parameter as the
     // error code.
     //
-    fn func(stack: &[Option<u32>], rval: &mut [u8]) -> Result<usize, Failure> {
+    fn loopy(stack: &[Option<u32>], rval: &mut [u8]) -> Result<usize, Failure> {
         if stack.len() == 0 {
             Err(Failure::Fault(Fault::MissingParameters))
         } else if rval.len() < 1 {
@@ -348,18 +348,34 @@ mod tests {
         }
     }
 
-    fn run(op: &[Op]) -> Result<Vec<Result<Vec<u8>, u32>>, Failure> {
+    fn okno(
+        _stack: &[Option<u32>],
+        _rval: &mut [u8],
+    ) -> Result<usize, Failure> {
+        Ok(0)
+    }
+
+    fn run(ops: &[Op]) -> Result<Vec<Result<Vec<u8>, u32>>, Failure> {
         let mut stack = [None; 8];
         let mut rstack = [0u8; 256];
         let mut scratch = [0u8; 256];
-        let mut text = [0u8; 256];
-        let functions: &[Function] = &[func];
+        let mut text: Vec<u8> = vec![];
+        text.resize_with(2048, Default::default);
 
-        let serialized = to_slice(op, &mut text).unwrap();
+        let functions: &[Function] = &[loopy, okno];
+
+        let buf = &mut text.as_mut_slice();
+        let mut current = 0;
+
+        for op in ops {
+            let serialized = to_slice(op, &mut buf[current..]).unwrap();
+            current += serialized.len();
+        }
+
         let mut ninstr = 0;
 
         execute(
-            &serialized[1..],
+            &buf[0..],
             functions,
             &mut stack,
             &mut rstack,
@@ -502,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn loopy() {
+    fn test_loopy() {
         let iter = 10;
 
         let op = [
@@ -546,5 +562,12 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_okno() {
+        let op = [Op::Call(TargetFunction(1)), Op::Done];
+
+        assert_eq!(run(&op), Ok(vec![Ok(vec![])]));
     }
 }
