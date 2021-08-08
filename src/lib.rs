@@ -4,14 +4,14 @@
 /// HIF: The Hubris/Humility Interchange Format
 ///
 /// When debugging Hubris, we have found it handy to get a task to execute as
-/// a proxy for an external task to (e.g.) perform I2C transactions.  This was
-/// born as an ad hoc facility, effected done by the debugger stopping the
-/// target and writing parameters to well-known memory locations, but as our
-/// need for proxy behavior became more sophisticated, it became clear that we
-/// needed something more general purpose.  HIF represents a simple,
-/// stack-based machine that can be executed in a memory-constrained no-std
-/// environment.  While this was designed to accommodate Hubris and Humility,
-/// there is nothing specific to either, and may well have other uses.
+/// a proxy for an external task.  This was born as an ad hoc facility to
+/// induce I2C transactions, effected by the debugger stopping the target and
+/// writing parameters to well-known memory locations; as our need for proxy
+/// behavior became more sophisticated, it became clear that we needed
+/// something more general purpose.  HIF represents a simple, stack-based
+/// machine that can be executed in a memory-constrained no-std environment.
+/// While this was designed to accommodate Hubris and Humility, there is
+/// nothing specific to either, and may well have other uses.
 ///
 use postcard::{take_from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,7 @@ pub enum Op {
     Label(Target),
     Call(TargetFunction),
     Drop,
+    DropN(u8),
     Push(u8),
     Push16(u16),
     Push32(u32),
@@ -212,6 +213,12 @@ pub fn execute<'a>(
                         sp = drop(stack, sp)?;
                     }
 
+                    Op::DropN(val) => {
+                        for _i in 0..val {
+                            sp = drop(stack, sp)?;
+                        }
+                    }
+
                     Op::Swap => {
                         if sp < 2 {
                             return Err(Failure::Fault(Fault::DupUnderflow));
@@ -355,12 +362,19 @@ mod tests {
         Ok(0)
     }
 
-    fn run(ops: &[Op]) -> Result<Vec<Result<Vec<u8>, u32>>, Failure> {
+    fn run(
+        ops: &[Op],
+        assert_stack: Option<&[Option<u32>]>,
+    ) -> Result<Vec<Result<Vec<u8>, u32>>, Failure> {
         let mut stack = [None; 8];
         let mut rstack = [0u8; 256];
         let mut scratch = [0u8; 256];
         let mut text: Vec<u8> = vec![];
         text.resize_with(2048, Default::default);
+
+        assert!(
+            assert_stack.is_none() || assert_stack.unwrap().len() < stack.len()
+        );
 
         let functions: &[Function] = &[loopy, okno];
 
@@ -388,6 +402,18 @@ mod tests {
         )?;
 
         std::println!("{} total instructions", ninstr);
+
+        if let Some(assert_stack) = assert_stack {
+            for i in 0..assert_stack.len() {
+                if assert_stack[i] != stack[i] {
+                    panic!(
+                        "stack mismatch; expected: {:#x?} found: {:#x?}",
+                        assert_stack,
+                        &stack[0..assert_stack.len()]
+                    );
+                }
+            }
+        }
 
         let mut rvec = vec![];
         let mut result = &rstack[0..];
@@ -418,7 +444,7 @@ mod tests {
     }
 
     fn fault(op: &[Op], expected: Fault) {
-        let rval = run(op);
+        let rval = run(op, None);
 
         if let Err(Failure::Fault(fault)) = rval {
             assert_eq!(fault, expected);
@@ -428,7 +454,7 @@ mod tests {
     }
 
     fn illop(op: &[Op], expected: IllegalOp) {
-        let rval = run(op);
+        let rval = run(op, None);
 
         if let Err(Failure::IllegalOp(illop)) = rval {
             assert_eq!(illop, expected);
@@ -452,6 +478,33 @@ mod tests {
         fault(&[Op::Drop], Fault::DropUnderflow);
     }
 
+    #[test]
+    fn dropn() {
+        let op = [
+            Op::Push(0x09),
+            Op::Push(0x19),
+            Op::Push(0x1d),
+            Op::Push(0xe),
+            Op::DropN(2),
+            Op::Done,
+        ];
+
+        run(&op, Some(&[Some(0x09), Some(0x19)])).unwrap();
+    }
+
+    #[test]
+    fn dropn_underflow() {
+        let op = [
+            Op::Push(0x09),
+            Op::Push(0x19),
+            Op::Push(0x1d),
+            Op::Push(0xe),
+            Op::DropN(5),
+        ];
+
+        fault(&op, Fault::DropUnderflow);
+    }
+ 
     #[test]
     fn overflow() {
         let op = [
@@ -532,7 +585,7 @@ mod tests {
             Op::Done,
         ];
 
-        let rval = run(&op);
+        let rval = run(&op, None);
         assert!(rval.is_ok());
 
         let rval = rval.unwrap();
@@ -568,6 +621,6 @@ mod tests {
     fn test_okno() {
         let op = [Op::Call(TargetFunction(1)), Op::Done];
 
-        assert_eq!(run(&op), Ok(vec![Ok(vec![])]));
+        assert_eq!(run(&op, None), Ok(vec![Ok(vec![])]));
     }
 }
