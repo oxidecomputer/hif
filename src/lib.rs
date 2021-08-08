@@ -13,6 +13,7 @@
 /// While this was designed to accommodate Hubris and Humility, there is
 /// nothing specific to either, and may well have other uses.
 ///
+use pkg_version::*;
 use postcard::{take_from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +83,10 @@ pub enum FunctionResult<'a> {
 }
 
 pub type Function = fn(&[Option<u32>], &mut [u8]) -> Result<usize, Failure>;
+
+pub const HIF_VERSION_MAJOR: u32 = pkg_version_major!();
+pub const HIF_VERSION_MINOR: u32 = pkg_version_minor!();
+pub const HIF_VERSION_PATCH: u32 = pkg_version_patch!();
 
 pub fn execute<'a>(
     text: &[u8],

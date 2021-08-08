@@ -1,10 +1,11 @@
 [package]
 name = "hif"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Bryan Cantrill <bryan@oxide.computer>"]
 edition = "2018"
 
 [dependencies]
 postcard = "0.7.0"
 serde = { version = "1.0.126", default-features = false }
+pkg-version = { version = "1.0.0" }
 
