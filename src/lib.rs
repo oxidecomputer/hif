@@ -1,18 +1,73 @@
 #![no_std]
 
-///
-/// HIF: The Hubris/Humility Interchange Format
-///
-/// When debugging Hubris, we have found it handy to get a task to execute as
-/// a proxy for an external task.  This was born as an ad hoc facility to
-/// induce I2C transactions, effected by the debugger stopping the target and
-/// writing parameters to well-known memory locations; as our need for proxy
-/// behavior became more sophisticated, it became clear that we needed
-/// something more general purpose.  HIF represents a simple, stack-based
-/// machine that can be executed in a memory-constrained no-std environment.
-/// While this was designed to accommodate Hubris and Humility, there is
-/// nothing specific to either, and may well have other uses.
-///
+//! # HIF: The Hubris/Humility Interchange Format
+//!
+//! When debugging Hubris, we have found it handy to get a task to execute as
+//! a proxy for an external task.  This was born as an ad hoc facility to
+//! induce I2C transactions, effected by the debugger stopping the target and
+//! writing parameters to well-known memory locations; as our need for proxy
+//! behavior became more sophisticated, it became clear that we needed
+//! something more general purpose.  HIF represents a simple, stack-based
+//! machine that can be executed in a memory-constrained no-std environment.
+//! While this was designed to accommodate Hubris and Humility, there is
+//! nothing specific to either, and may well have other uses.
+//!
+//! ## Machine model
+//!
+//! The HIF machine model consists of program text consisting of an array of
+//! [`Op`] structures denoting operations; a stack of 32-bit values for
+//! arguments and variables; a finite number of branch targets corresponding
+//! to declared labels in program text; and an append-only return stack that
+//! consists of an array of [`FunctionResult`] enums.  Of note, this model has
+//! no registers (though such extensions are clearly possible).
+//!
+//! ## Paramaterization and errors
+//!
+//! As much as possible, HIF tries to be *mechanism* rather than *policy*,
+//! leaving it up to the entity that interprets HIF to parametarize the
+//! machine model (stack size, return area size) and enforce any run-time
+//! limits on executed operations.  If errors are encountered in execution
+//! (due to either illegal operations or running against limits), an error is
+//! explicitly returned.
+//!
+//! ## Serialization/Deserialization
+//!
+//! It is an essential constraint of HIF that it can execute in a `no_std`
+//! environment; for deserialization (of program text) and serialization (of
+//! the return stack), HIF uses [postcard](https://crates.io/crates/postcard).
+//!
+//! ## Functions
+//!
+//! A function is denoted by a [`TargetFunction`] structure that contains a
+//! `u8` index into the `functions` array passed into `execute`.  HIF makes no
+//! assumption about what these functions are or how they are discovered; if
+//! the program text attempts to call an invalid function, an error returned.
+//! Functions themselves are implemented by whomever is calling `excute`; they
+//! take the stack and the (mutable) return stack as arguments.  Functions are
+//! expected to return a failure if the stack contains an incorrect number of
+//! arguments or if the return stack is too small to contain the return
+//! value(s).  Functions do not consume arguments from the stack; callers must
+//! explicitly drop parameters from the stack if they are no longer needed.
+//!
+//! ## Labels
+//!
+//! The [`Op::Label`] operation denotes a target for a branch, allowing
+//! branches to be symbolic rather than in terms of text offsets.  Labels are
+//! created on the stack; the number of labels is a const generic paramater to
+//! `execute`.
+//!
+//! ## Stack manipulation operations
+//!
+//! HIF offers basic stack manipulation operations like [`Op::Push`],
+//! [`Op::Dup`], [`Op::Swap`] and [`Op::Drop`].  The call stack is one of
+//! `Option<u32>`; [`Op::PushNone`] pushes `None`, while all other push
+//! operations ultimately push `Some<u32>`.
+//!
+//! ## Arithmetic operations
+//!
+//! HIF offers a paucity of arithmetic operations.  These operations consume
+//! the top two elements of the stack, and push the result.
+//!
 use pkg_version::*;
 use postcard::{take_from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
@@ -23,47 +78,126 @@ pub struct TargetFunction(pub u8);
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub struct Target(pub u8);
 
+///
+/// Enum that defines a HIF operation
+///
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum Op {
+    /// Define a label as `Target`
     Label(Target),
+
+    /// Call the specified function
     Call(TargetFunction),
+
+    /// Drop the top element on the stack
     Drop,
+
+    /// Drop the top N elements on the stack
     DropN(u8),
+
+    /// Push `Some<u32>` onto the stack that contains the specified `u8`
     Push(u8),
+
+    /// Push `Some<u32>` onto the stack that contains the specified `u16`
     Push16(u16),
+
+    /// Push `Some<u32>` onto the stack that contains the specified value
     Push32(u32),
+
+    /// Push `None` onto the stack
     PushNone,
+
+    /// Swap the top two elements on the stack
     Swap,
+
+    /// Duplicate the top element of the stack, pushing it
     Dup,
+
+    /// Add the top two elements of the stack, replacing them with the result
     Add,
+
+    /// Compare the top two elements of the stack, branching if the topmost
+    /// is less than the second topmost
     BranchLessThan(Target),
+
+    /// Compare the top two elements of the stack, branching if the topmost
+    /// is less than or equal to the second topmost
     BranchLessThanOrEqualTo(Target),
+
+    /// Compare the top two elements of the stack, branching if the topmost
+    /// is greater than the second topmost
     BranchGreaterThan(Target),
+
+    /// Compare the top two elements of the stack, branching if the topmost
+    /// is greater than or equal to the second topmost
     BranchGreaterThanOrEqualTo(Target),
+
+    /// Compare the top two elements of the stack, branching if they are equal
     BranchEqualTo(Target),
+
+    /// Always branch
     BranchAlways(Target),
+
+    /// Denote the end of execution. All exection must end with `Done`
     Done,
 }
 
+///
+/// Enum to denote an *illegal operation*, a failure that constitutes
+/// illegal program text that can't ever operate correctly
+///
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum IllegalOp {
+    /// Specified target does not exist
     NoTarget,
+
+    /// Attempt to specify a target that exceeds the bounds
     BadTarget,
+
+    /// Attempt to call a function that exceeds the bounds
     BadFunction,
 }
 
+///
+/// Enum to denote a *fault*, a run-time failure that isn't an illegal
+/// operation
+///
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
 pub enum Fault {
+    /// Attempt to push to a full stack
     StackOverflow,
+
+    /// Attempt to reference beneath the bottom of the stack
     StackUnderflow,
+
+    /// Attempt to operate on a stack value that was `None`
     OperationOnNone,
+
+    /// Attempt to drop on an empty stack
     DropUnderflow,
+
+    /// Attempt to dup onto a full stack
     DupUnderflow,
+
+    /// Attempt to call a function with an insufficient number of
+    /// paramaters pushed onto the stack
     MissingParameters,
+
+    /// Attempt to call a function with a bad parameter, the index of
+    /// which is denoted by the datum
     BadParameter(u8),
+
+    /// Attempt to call a function with an empty parameter, the index of
+    /// which is denoted by the datum
     EmptyParameter(u8),
+
+    /// Attempt to overflow return stack from within a function
     ReturnValueOverflow,
+
+    /// Attempt to overflow return stack with a function's return value
     ReturnStackOverflow,
+
+    /// Attempt to overflow return stack with [`Op::Done`]
     DoneStackOverflow,
 }
 
@@ -88,20 +222,35 @@ pub const HIF_VERSION_MAJOR: u32 = pkg_version_major!();
 pub const HIF_VERSION_MINOR: u32 = pkg_version_minor!();
 pub const HIF_VERSION_PATCH: u32 = pkg_version_patch!();
 
-pub fn execute<'a>(
+///
+/// The [`execute`] function actually executes the HIF machine.  It takes
+/// program text (a slice of `u8` that will be deserialized into an array
+/// of `Op` enums), functions (a slice of `Function`), a stack (which should
+/// be initialized to an array of `None`), a return stack, a scratch area, and
+/// a closure to be called on every operation.  (Note that the number of
+/// labels is parameterized as a const generic.)
+///
+//
+// Note that the `where` clause is used here on `check` instead of the more
+// conventional `impl FnMut` position because of a Rust limitation; see
+// [#85475](https://github.com/rust-lang/rust/issues/85475) for more details.
+//
+pub fn execute<'a, F, const NLABELS: usize>(
     text: &[u8],
     functions: &[Function],
     stack: &mut [Option<u32>],
     rstack: &mut [u8],
     scratch: &mut [u8],
-    mut check: impl FnMut(usize, &Op) -> Result<(), Failure>,
-) -> Result<(), Failure> {
+    mut check: F,
+) -> Result<(), Failure>
+where
+    F: FnMut(usize, &Op) -> Result<(), Failure>,
+{
     let mut pc = text;
     let mut sp = 0;
     let mut rp = 0;
 
-    // Three labels ought to be enough for anyone!
-    let mut labels = [None, None, None];
+    let mut labels = [None; NLABELS];
 
     fn labelndx(labels: &[Option<&[u8]>], val: u8) -> Result<usize, Failure> {
         let ndx = val as usize;
@@ -371,6 +520,7 @@ mod tests {
         ops: &[Op],
         assert_stack: Option<&[Option<u32>]>,
     ) -> Result<Vec<Result<Vec<u8>, u32>>, Failure> {
+        const NLABELS: usize = 8;
         let mut stack = [None; 8];
         let mut rstack = [0u8; 256];
         let mut scratch = [0u8; 256];
@@ -393,7 +543,7 @@ mod tests {
 
         let mut ninstr = 0;
 
-        execute(
+        execute::<_, NLABELS>(
             &buf[0..],
             functions,
             &mut stack,
@@ -509,7 +659,7 @@ mod tests {
 
         fault(&op, Fault::DropUnderflow);
     }
- 
+
     #[test]
     fn overflow() {
         let op = [
@@ -559,6 +709,35 @@ mod tests {
         let op = [Op::Label(Target(0)), Op::BranchAlways(Target(255))];
 
         illop(&op, IllegalOp::BadTarget);
+    }
+
+    #[test]
+    fn bad_label() {
+        let mut ops = vec![];
+
+        for i in 0..4 {
+            ops.push(Op::Label(Target(i)));
+        }
+
+        ops.push(Op::Done);
+
+        //
+        // We have at least 4 labels, so this should be fine...
+        //
+        let rval = run(&ops, None);
+        assert_eq!(rval, Ok(vec![]));
+
+        ops.pop();
+
+        //
+        // Assuming that we don't have 100 labels.
+        //
+        for i in 4..100 {
+            ops.push(Op::Label(Target(i)));
+        }
+
+        ops.push(Op::Done);
+        illop(&ops, IllegalOp::BadTarget);
     }
 
     #[test]

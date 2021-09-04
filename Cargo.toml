@@ -1,8 +1,9 @@
 [package]
 name = "hif"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Bryan Cantrill <bryan@oxide.computer>"]
 edition = "2018"
+license = "MPL-2.0"
 
 [dependencies]
 postcard = "0.7.0"
