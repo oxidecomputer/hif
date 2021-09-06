@@ -275,7 +275,7 @@ where
     fn function(functions: &[Function], val: u8) -> Result<Function, Failure> {
         let ndx = val as usize;
 
-        if ndx > functions.len() {
+        if ndx >= functions.len() {
             Err(Failure::IllegalOp(IllegalOp::BadFunction))
         } else {
             Ok(functions[ndx])
@@ -806,5 +806,12 @@ mod tests {
         let op = [Op::Call(TargetFunction(1)), Op::Done];
 
         assert_eq!(run(&op, None), Ok(vec![Ok(vec![])]));
+    }
+
+    #[test]
+    fn test_obiwan() {
+        let op = [Op::Call(TargetFunction(2)), Op::Done];
+
+        illop(&op, IllegalOp::BadFunction);
     }
 }
