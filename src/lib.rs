@@ -43,11 +43,13 @@
 //! assumption about what these functions are or how they are discovered; if
 //! the program text attempts to call an invalid function, an error returned.
 //! Functions themselves are implemented by whomever is calling `excute`; they
-//! take the stack and the (mutable) return stack as arguments.  Functions are
-//! expected to return a failure if the stack contains an incorrect number of
-//! arguments or if the return stack is too small to contain the return
-//! value(s).  Functions do not consume arguments from the stack; callers must
-//! explicitly drop parameters from the stack if they are no longer needed.
+//! take the stack, a slice that is a read-only memory, and the (mutable)
+//! return stack as arguments.  Functions are expected to return a failure if
+//! the stack contains an incorrect number of arguments, or if the function
+//! attempts to access memory not contained in the read-only slice, or if the
+//! return stack is too small to contain the return value(s).  Functions do
+//! not consume arguments from the stack; callers must explicitly drop
+//! parameters from the stack if they are no longer needed.
 //!
 //! ## Labels
 //!
@@ -199,6 +201,9 @@ pub enum Fault {
 
     /// Attempt to overflow return stack with [`Op::Done`]
     DoneStackOverflow,
+
+    /// Attempt to access beyond the bounds of the memory
+    AccessOutOfBounds,
 }
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
@@ -216,7 +221,8 @@ pub enum FunctionResult<'a> {
     Done,
 }
 
-pub type Function = fn(&[Option<u32>], &mut [u8]) -> Result<usize, Failure>;
+pub type Function =
+    fn(&[Option<u32>], &[u8], &mut [u8]) -> Result<usize, Failure>;
 
 pub const HIF_VERSION_MAJOR: u32 = pkg_version_major!();
 pub const HIF_VERSION_MINOR: u32 = pkg_version_minor!();
@@ -224,11 +230,12 @@ pub const HIF_VERSION_PATCH: u32 = pkg_version_patch!();
 
 ///
 /// The [`execute`] function actually executes the HIF machine.  It takes
-/// program text (a slice of `u8` that will be deserialized into an array
-/// of `Op` enums), functions (a slice of `Function`), a stack (which should
-/// be initialized to an array of `None`), a return stack, a scratch area, and
-/// a closure to be called on every operation.  (Note that the number of
-/// labels is parameterized as a const generic.)
+/// program text (a slice of `u8` that will be deserialized into an array of
+/// `Op` enums), functions (a slice of `Function`), a slice of read-only data
+/// representing memory, a stack (which should be initialized to an array of
+/// `None`), a return stack, a scratch area, and a closure to be called on
+/// every operation.  (Note that the number of labels is parameterized as a
+/// const generic.)
 ///
 //
 // Note that the `where` clause is used here on `check` instead of the more
@@ -238,6 +245,7 @@ pub const HIF_VERSION_PATCH: u32 = pkg_version_patch!();
 pub fn execute<'a, F, const NLABELS: usize>(
     text: &[u8],
     functions: &[Function],
+    data: &[u8],
     stack: &mut [Option<u32>],
     rstack: &mut [u8],
     scratch: &mut [u8],
@@ -441,7 +449,7 @@ where
 
                     Op::Call(TargetFunction(val)) => {
                         let target = function(functions, val)?;
-                        let rval = target(&stack[0..sp], scratch);
+                        let rval = target(&stack[0..sp], data, scratch);
 
                         let rval = match rval {
                             Ok(r) => FunctionResult::Success(&scratch[0..r]),
@@ -489,7 +497,11 @@ mod tests {
     // is even, otherwise it returns a failure with the parameter as the
     // error code.
     //
-    fn loopy(stack: &[Option<u32>], rval: &mut [u8]) -> Result<usize, Failure> {
+    fn loopy(
+        stack: &[Option<u32>],
+        _data: &[u8],
+        rval: &mut [u8],
+    ) -> Result<usize, Failure> {
         if stack.len() == 0 {
             Err(Failure::Fault(Fault::MissingParameters))
         } else if rval.len() < 1 {
@@ -511,9 +523,36 @@ mod tests {
 
     fn okno(
         _stack: &[Option<u32>],
+        _data: &[u8],
         _rval: &mut [u8],
     ) -> Result<usize, Failure> {
         Ok(0)
+    }
+
+    fn loadat(
+        stack: &[Option<u32>],
+        data: &[u8],
+        rval: &mut [u8],
+    ) -> Result<usize, Failure> {
+        if stack.len() == 0 {
+            Err(Failure::Fault(Fault::MissingParameters))
+        } else if rval.len() < 1 {
+            Err(Failure::Fault(Fault::ReturnValueOverflow))
+        } else {
+            match stack[0] {
+                Some(val) => {
+                    let ndx = val as usize;
+
+                    if ndx < data.len() {
+                        rval[0] = data[ndx];
+                        Ok(1)
+                    } else {
+                        Err(Failure::Fault(Fault::AccessOutOfBounds))
+                    }
+                }
+                None => Err(Failure::Fault(Fault::BadParameter(0))),
+            }
+        }
     }
 
     fn run(
@@ -531,7 +570,7 @@ mod tests {
             assert_stack.is_none() || assert_stack.unwrap().len() < stack.len()
         );
 
-        let functions: &[Function] = &[loopy, okno];
+        let functions: &[Function] = &[loopy, okno, loadat];
 
         let buf = &mut text.as_mut_slice();
         let mut current = 0;
@@ -542,10 +581,12 @@ mod tests {
         }
 
         let mut ninstr = 0;
+        let data = [0x1du8; 1];
 
         execute::<_, NLABELS>(
             &buf[0..],
             functions,
+            &data[0..1],
             &mut stack,
             &mut rstack,
             &mut scratch,
@@ -755,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn test_loopy() {
+    fn call_loopy() {
         let iter = 10;
 
         let op = [
@@ -802,15 +843,27 @@ mod tests {
     }
 
     #[test]
-    fn test_okno() {
+    fn call_okno() {
         let op = [Op::Call(TargetFunction(1)), Op::Done];
 
         assert_eq!(run(&op, None), Ok(vec![Ok(vec![])]));
     }
 
     #[test]
-    fn test_obiwan() {
-        let op = [Op::Call(TargetFunction(2)), Op::Done];
+    fn call_loadat_good() {
+        let op = [Op::Push(0), Op::Call(TargetFunction(2)), Op::Done];
+        assert_eq!(run(&op, None), Ok(vec![Ok(vec![0x1d])]));
+    }
+
+    #[test]
+    fn call_loadat_bad() {
+        let op = [Op::Push(1), Op::Call(TargetFunction(2)), Op::Done];
+        fault(&op, Fault::AccessOutOfBounds);
+    }
+
+    #[test]
+    fn function_obiwan() {
+        let op = [Op::Call(TargetFunction(3)), Op::Done];
 
         illop(&op, IllegalOp::BadFunction);
     }
