@@ -1,4 +1,13 @@
 #![no_std]
+//
+// Note that the below rustdoc is used by `cargo readme` to generate the
+// README, but due to https://github.com/livioribeiro/cargo-readme/issues/70,
+// it must be cleaned up manually, e.g.:
+//
+// ```
+// cargo readme | sed 's/\[\(`[^`]*`\)]/\1/g' > README.md
+// ```
+//
 
 //! # HIF: The Hubris/Humility Interchange Format
 //!
