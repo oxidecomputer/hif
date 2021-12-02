@@ -192,7 +192,7 @@ pub enum Fault {
     /// Attempt to drop on an empty stack
     DropUnderflow,
 
-    /// Attempt to dup onto a full stack
+    /// Attempt to dup on an empty stack
     DupUnderflow,
 
     /// Attempt to call a function with an insufficient number of
@@ -344,7 +344,7 @@ where
             return Err(Failure::Fault(Fault::DupUnderflow));
         }
 
-        push(stack, sp, stack[sp])
+        push(stack, sp, stack[sp - 1])
     }
 
     loop {
@@ -397,7 +397,7 @@ where
 
                     Op::Swap => {
                         if sp < 2 {
-                            return Err(Failure::Fault(Fault::DupUnderflow));
+                            return Err(Failure::Fault(Fault::StackUnderflow));
                         }
 
                         let tmp = stack[sp - 1];
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn underflow() {
-        fault(&[Op::Add], Fault::StackUnderflow);
+        fault(&[Op::Push(0), Op::Add], Fault::StackUnderflow);
     }
 
     #[test]
@@ -686,6 +686,23 @@ mod tests {
     #[test]
     fn drop_underflow() {
         fault(&[Op::Drop], Fault::DropUnderflow);
+    }
+
+    #[test]
+    fn swap_underflow() {
+        fault(&[Op::Push(0), Op::Swap], Fault::StackUnderflow);
+    }
+
+    #[test]
+    fn dup() {
+        let op = [
+            Op::Push(0x02),
+            Op::Dup,
+            Op::Add,
+            Op::Done,
+        ];
+
+        run(&op, Some(&[Some(0x04)])).unwrap();
     }
 
     #[test]
