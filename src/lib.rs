@@ -56,7 +56,7 @@
 //! `u8` index into the `functions` array passed into `execute`.  HIF makes no
 //! assumption about what these functions are or how they are discovered; if
 //! the program text attempts to call an invalid function, an error returned.
-//! Functions themselves are implemented by whomever is calling `excute`; they
+//! Functions themselves are implemented by whomever is calling `execute`; they
 //! take the stack, a slice that is a read-only memory, and the (mutable)
 //! return stack as arguments.  Functions are expected to return a failure if
 //! the stack contains an incorrect number of arguments, or if the function
@@ -154,7 +154,7 @@ pub enum Op {
     /// Always branch
     BranchAlways(Target),
 
-    /// Denote the end of execution. All exection must end with `Done`
+    /// Denote the end of execution. All execution must end with `Done`
     Done,
 }
 
@@ -196,7 +196,7 @@ pub enum Fault {
     DupUnderflow,
 
     /// Attempt to call a function with an insufficient number of
-    /// paramaters pushed onto the stack
+    /// parameters pushed onto the stack
     MissingParameters,
 
     /// Attempt to call a function with a bad parameter, the index of
