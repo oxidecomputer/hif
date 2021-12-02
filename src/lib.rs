@@ -397,7 +397,7 @@ where
 
                     Op::Swap => {
                         if sp < 2 {
-                            return Err(Failure::Fault(Fault::DupUnderflow));
+                            return Err(Failure::Fault(Fault::StackUnderflow));
                         }
 
                         let tmp = stack[sp - 1];
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn underflow() {
-        fault(&[Op::Add], Fault::StackUnderflow);
+        fault(&[Op::Push(0), Op::Add], Fault::StackUnderflow);
     }
 
     #[test]
@@ -686,6 +686,11 @@ mod tests {
     #[test]
     fn drop_underflow() {
         fault(&[Op::Drop], Fault::DropUnderflow);
+    }
+
+    #[test]
+    fn swap_underflow() {
+        fault(&[Op::Push(0), Op::Swap], Fault::StackUnderflow);
     }
 
     #[test]
