@@ -256,7 +256,7 @@ pub const HIF_VERSION_PATCH: u32 = pkg_version_patch!();
 // conventional `impl FnMut` position because of a Rust limitation; see
 // [#85475](https://github.com/rust-lang/rust/issues/85475) for more details.
 //
-pub fn execute<'a, F, const NLABELS: usize>(
+pub fn execute<F, const NLABELS: usize>(
     text: &[u8],
     functions: &[Function],
     data: &[u8],
