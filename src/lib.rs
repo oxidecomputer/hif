@@ -288,7 +288,7 @@ where
         labels: &[Option<&'a [u8]>],
         val: u8,
     ) -> Result<&'a [u8], Failure> {
-        match labels[labelndx(&labels, val)?] {
+        match labels[labelndx(labels, val)?] {
             Some(target) => Ok(target),
             None => Err(Failure::IllegalOp(IllegalOp::NoTarget)),
         }
@@ -380,7 +380,7 @@ where
                     }
 
                     Op::Add => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
                         sp = drop(stack, sp)?;
                         stack[sp - 1] = Some(lhs + rhs);
                     }
@@ -406,7 +406,7 @@ where
                     }
 
                     Op::BranchLessThan(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs < rhs {
                             pc = target(&labels, val)?;
@@ -414,7 +414,7 @@ where
                     }
 
                     Op::BranchLessThanOrEqualTo(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs <= rhs {
                             pc = target(&labels, val)?;
@@ -422,7 +422,7 @@ where
                     }
 
                     Op::BranchGreaterThan(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs > rhs {
                             pc = target(&labels, val)?;
@@ -430,7 +430,7 @@ where
                     }
 
                     Op::BranchGreaterThanOrEqualTo(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs >= rhs {
                             pc = target(&labels, val)?;
@@ -438,7 +438,7 @@ where
                     }
 
                     Op::BranchEqualTo(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs == rhs {
                             pc = target(&labels, val)?;
