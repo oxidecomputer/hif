@@ -400,9 +400,7 @@ where
                             return Err(Failure::Fault(Fault::StackUnderflow));
                         }
 
-                        let tmp = stack[sp - 1];
-                        stack[sp - 1] = stack[sp - 2];
-                        stack[sp - 2] = tmp;
+                        stack.swap(sp - 1, sp - 2);
                     }
 
                     Op::BranchLessThan(Target(val)) => {
