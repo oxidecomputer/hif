@@ -452,7 +452,7 @@ where
                     Op::Done => {
                         let done = FunctionResult::Done;
 
-                        if let Err(_) = to_slice(&done, &mut rstack[rp..]) {
+                        if to_slice(&done, &mut rstack[rp..]).is_err() {
                             return Err(Failure::Fault(
                                 Fault::DoneStackOverflow,
                             ));
