@@ -132,6 +132,15 @@ pub enum Op {
     /// Add the top two elements of the stack, replacing them with the result
     Add,
 
+    /// Bitwise AND top two elements of the stack, replacing them with result
+    And,
+
+    /// Bitwise OR top two elements of the stack, replacing them with result
+    Or,
+
+    /// Bitwise XOR top two elements of the stack, replacing them with result
+    Xor,
+
     /// Compare the top two elements of the stack, branching if the topmost
     /// is less than the second topmost
     BranchLessThan(Target),
@@ -383,6 +392,24 @@ where
                         let (lhs, rhs) = operands(&stack, sp)?;
                         sp = drop(stack, sp)?;
                         stack[sp - 1] = Some(lhs + rhs);
+                    }
+
+                    Op::And => {
+                        let (lhs, rhs) = operands(&stack, sp)?;
+                        sp = drop(stack, sp)?;
+                        stack[sp - 1] = Some(lhs & rhs);
+                    }
+
+                    Op::Or => {
+                        let (lhs, rhs) = operands(&stack, sp)?;
+                        sp = drop(stack, sp)?;
+                        stack[sp - 1] = Some(lhs | rhs);
+                    }
+
+                    Op::Xor => {
+                        let (lhs, rhs) = operands(&stack, sp)?;
+                        sp = drop(stack, sp)?;
+                        stack[sp - 1] = Some(lhs ^ rhs);
                     }
 
                     Op::Drop => {
@@ -695,12 +722,7 @@ mod tests {
 
     #[test]
     fn dup() {
-        let op = [
-            Op::Push(0x02),
-            Op::Dup,
-            Op::Add,
-            Op::Done,
-        ];
+        let op = [Op::Push(0x02), Op::Dup, Op::Add, Op::Done];
 
         run(&op, Some(&[Some(0x04)])).unwrap();
     }
@@ -730,6 +752,37 @@ mod tests {
         ];
 
         fault(&op, Fault::DropUnderflow);
+    }
+
+    #[test]
+    fn and() {
+        let op = [
+            Op::Push32(0x55aa55aa),
+            Op::Push32(0x11111111),
+            Op::And,
+            Op::Done,
+        ];
+
+        run(&op, Some(&[Some(0x11001100)])).unwrap();
+    }
+
+    #[test]
+    fn or() {
+        let op = [Op::Push32(0x55aa55aa), Op::Push16(0xaa55), Op::Or, Op::Done];
+
+        run(&op, Some(&[Some(0x55aaffff)])).unwrap();
+    }
+
+    #[test]
+    fn xor() {
+        let op = [
+            Op::Push16(0xaaaa),
+            Op::Push32(0x55aa55aa),
+            Op::Xor,
+            Op::Done,
+        ];
+
+        run(&op, Some(&[Some(0x55aaff00)])).unwrap();
     }
 
     #[test]
