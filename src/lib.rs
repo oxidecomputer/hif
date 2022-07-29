@@ -84,6 +84,8 @@
 //! HIF offers a paucity of arithmetic operations.  These operations consume
 //! the top two elements of the stack, and push the result.
 //!
+
+use core::convert::TryFrom;
 use pkg_version::*;
 use postcard::{take_from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
@@ -140,6 +142,16 @@ pub enum Op {
 
     /// Bitwise XOR top two elements of the stack, replacing them with result
     Xor,
+
+    /// Expands the top `u32` from the stack into four `u8`
+    ///
+    /// The highest byte of the `u32` ends up at the top of the stack
+    Expand32,
+
+    /// Collects four `u8` from the top of the stack into a single `u32`
+    ///
+    /// The top of the stack ends up as the highest byte of the `u32`
+    Collect32,
 
     /// Compare the top two elements of the stack, branching if the topmost
     /// is less than the second topmost
@@ -265,7 +277,7 @@ pub const HIF_VERSION_PATCH: u32 = pkg_version_patch!();
 // conventional `impl FnMut` position because of a Rust limitation; see
 // [#85475](https://github.com/rust-lang/rust/issues/85475) for more details.
 //
-pub fn execute<'a, F, const NLABELS: usize>(
+pub fn execute<F, const NLABELS: usize>(
     text: &[u8],
     functions: &[Function],
     data: &[u8],
@@ -297,7 +309,7 @@ where
         labels: &[Option<&'a [u8]>],
         val: u8,
     ) -> Result<&'a [u8], Failure> {
-        match labels[labelndx(&labels, val)?] {
+        match labels[labelndx(labels, val)?] {
             Some(target) => Ok(target),
             None => Err(Failure::IllegalOp(IllegalOp::NoTarget)),
         }
@@ -389,27 +401,74 @@ where
                     }
 
                     Op::Add => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
                         sp = drop(stack, sp)?;
                         stack[sp - 1] = Some(lhs + rhs);
                     }
 
                     Op::And => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
                         sp = drop(stack, sp)?;
                         stack[sp - 1] = Some(lhs & rhs);
                     }
 
                     Op::Or => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
                         sp = drop(stack, sp)?;
                         stack[sp - 1] = Some(lhs | rhs);
                     }
 
                     Op::Xor => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
                         sp = drop(stack, sp)?;
                         stack[sp - 1] = Some(lhs ^ rhs);
+                    }
+
+                    Op::Expand32 => {
+                        if sp < 1 {
+                            return Err(Failure::Fault(Fault::StackUnderflow));
+                        }
+                        match stack[sp - 1] {
+                            Some(u) => {
+                                sp = drop(stack, sp)?;
+                                for byte in u.to_le_bytes() {
+                                    sp = push(stack, sp, Some(byte.into()))?;
+                                }
+                            }
+                            None => {
+                                return Err(Failure::Fault(
+                                    Fault::OperationOnNone,
+                                ))
+                            }
+                        }
+                    }
+
+                    Op::Collect32 => {
+                        if sp < 4 {
+                            return Err(Failure::Fault(Fault::StackUnderflow));
+                        }
+                        let mut buf = [0u8; 4];
+                        for i in 0..4 {
+                            match stack[sp - i - 1] {
+                                Some(b) => {
+                                    buf[i] = u8::try_from(b).map_err(|_| {
+                                        Failure::Fault(Fault::BadParameter(
+                                            i as u8,
+                                        ))
+                                    })?;
+                                }
+                                None => {
+                                    return Err(Failure::Fault(
+                                        Fault::OperationOnNone,
+                                    ));
+                                }
+                            }
+                        }
+                        let u = u32::from_be_bytes(buf);
+                        for _ in 0..3 {
+                            sp = drop(stack, sp)?;
+                        }
+                        stack[sp - 1] = Some(u);
                     }
 
                     Op::Drop => {
@@ -426,14 +485,11 @@ where
                         if sp < 2 {
                             return Err(Failure::Fault(Fault::StackUnderflow));
                         }
-
-                        let tmp = stack[sp - 1];
-                        stack[sp - 1] = stack[sp - 2];
-                        stack[sp - 2] = tmp;
+                        stack.swap(sp - 1, sp - 2);
                     }
 
                     Op::BranchLessThan(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs < rhs {
                             pc = target(&labels, val)?;
@@ -441,7 +497,7 @@ where
                     }
 
                     Op::BranchLessThanOrEqualTo(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs <= rhs {
                             pc = target(&labels, val)?;
@@ -449,7 +505,7 @@ where
                     }
 
                     Op::BranchGreaterThan(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs > rhs {
                             pc = target(&labels, val)?;
@@ -457,7 +513,7 @@ where
                     }
 
                     Op::BranchGreaterThanOrEqualTo(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs >= rhs {
                             pc = target(&labels, val)?;
@@ -465,7 +521,7 @@ where
                     }
 
                     Op::BranchEqualTo(Target(val)) => {
-                        let (lhs, rhs) = operands(&stack, sp)?;
+                        let (lhs, rhs) = operands(stack, sp)?;
 
                         if lhs == rhs {
                             pc = target(&labels, val)?;
@@ -479,7 +535,7 @@ where
                     Op::Done => {
                         let done = FunctionResult::Done;
 
-                        if let Err(_) = to_slice(&done, &mut rstack[rp..]) {
+                        if to_slice(&done, &mut rstack[rp..]).is_err() {
                             return Err(Failure::Fault(
                                 Fault::DoneStackOverflow,
                             ));
@@ -543,9 +599,9 @@ mod tests {
         _data: &[u8],
         rval: &mut [u8],
     ) -> Result<usize, Failure> {
-        if stack.len() == 0 {
+        if stack.is_empty() {
             Err(Failure::Fault(Fault::MissingParameters))
-        } else if rval.len() < 1 {
+        } else if rval.is_empty() {
             Err(Failure::Fault(Fault::ReturnValueOverflow))
         } else {
             match stack[stack.len() - 1] {
@@ -575,9 +631,9 @@ mod tests {
         data: &[u8],
         rval: &mut [u8],
     ) -> Result<usize, Failure> {
-        if stack.len() == 0 {
+        if stack.is_empty() {
             Err(Failure::Fault(Fault::MissingParameters))
-        } else if rval.len() < 1 {
+        } else if rval.is_empty() {
             Err(Failure::Fault(Fault::ReturnValueOverflow))
         } else {
             match stack[0] {
@@ -663,7 +719,7 @@ mod tests {
                             return Ok(rvec);
                         }
 
-                        FunctionResult::Success(ref payload) => {
+                        FunctionResult::Success(payload) => {
                             rvec.push(Ok(payload.to_vec()))
                         }
 
@@ -764,6 +820,43 @@ mod tests {
         ];
 
         run(&op, Some(&[Some(0x11001100)])).unwrap();
+    }
+
+    #[test]
+    fn expand32() {
+        let op = [Op::Push32(0xaabbccdd), Op::Expand32, Op::Done];
+        run(&op, Some(&[Some(0xdd), Some(0xcc), Some(0xbb), Some(0xaa)]))
+            .unwrap();
+    }
+
+    #[test]
+    fn collect32() {
+        let op = [
+            Op::Push32(0xaabbccdd),
+            Op::Expand32,
+            Op::Collect32,
+            Op::Done,
+        ];
+        run(&op, Some(&[Some(0xaabbccdd)])).unwrap();
+
+        let op = [
+            Op::Push32(0x1FF), // Not a byte
+            Op::Push(1),
+            Op::Push(2),
+            Op::Push(3),
+            Op::Collect32,
+            Op::Done,
+        ];
+        fault(&op, Fault::BadParameter(3));
+
+        let op = [
+            Op::Push(1),
+            Op::Push(2),
+            Op::Push(3),
+            Op::Collect32,
+            Op::Done,
+        ];
+        fault(&op, Fault::StackUnderflow);
     }
 
     #[test]
@@ -900,9 +993,9 @@ mod tests {
         let rval = rval.unwrap();
         assert!(rval.len() == iter as usize);
 
-        for i in 0..rval.len() {
+        for (i, r) in rval.iter().enumerate() {
             if i % 2 == 0 {
-                match &rval[i] {
+                match r {
                     Ok(val) => {
                         assert!(val.len() == 1);
                         assert!(val[0] == (i * 2) as u8);
@@ -913,7 +1006,7 @@ mod tests {
                     }
                 }
             } else {
-                match &rval[i] {
+                match r {
                     Err(err) => {
                         assert!(*err == i as u32);
                     }
