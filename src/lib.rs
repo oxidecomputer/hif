@@ -143,16 +143,6 @@ pub enum Op {
     /// Bitwise XOR top two elements of the stack, replacing them with result
     Xor,
 
-    /// Expands the top `u32` from the stack into four `u8`
-    ///
-    /// The highest byte of the `u32` ends up at the top of the stack
-    Expand32,
-
-    /// Collects four `u8` from the top of the stack into a single `u32`
-    ///
-    /// The top of the stack ends up as the highest byte of the `u32`
-    Collect32,
-
     /// Compare the top two elements of the stack, branching if the topmost
     /// is less than the second topmost
     BranchLessThan(Target),
@@ -177,6 +167,20 @@ pub enum Op {
 
     /// Denote the end of execution. All execution must end with `Done`
     Done,
+
+    // XXX These operations live at the bottom instead of with other arithmetic
+    // operations to avoid a flag day, since rearranging order would break the
+    // existing encoding.
+    //
+    /// Expands the top `u32` from the stack into four `u8`
+    ///
+    /// The highest byte of the `u32` ends up at the top of the stack
+    Expand32,
+
+    /// Collects four `u8` from the top of the stack into a single `u32`
+    ///
+    /// The top of the stack ends up as the highest byte of the `u32`
+    Collect32,
 }
 
 ///
