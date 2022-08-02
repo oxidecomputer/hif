@@ -1,6 +1,6 @@
 [package]
 name = "hif"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Bryan Cantrill <bryan@oxide.computer>"]
 edition = "2018"
 license = "MPL-2.0"
@@ -9,4 +9,3 @@ license = "MPL-2.0"
 postcard = "0.7.0"
 serde = { version = "1.0.126", default-features = false }
 pkg-version = { version = "1.0.0" }
-
