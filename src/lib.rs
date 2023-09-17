@@ -253,6 +253,12 @@ pub enum Failure {
     FunctionError(u32),
 }
 
+impl From<Fault> for Failure {
+    fn from(f: Fault) -> Self {
+        Self::Fault(f)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum FunctionResult<'a> {
     Success(&'a [u8]),
